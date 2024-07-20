@@ -1,4 +1,5 @@
 import os
+import multiprocessing
 import requests
 import json
 import random
@@ -6,7 +7,7 @@ from pprint import pprint
 from tqdm import tqdm
 
 states = {"Maharashtra": {"code": 27, "link": "https://mahabhunakasha.mahabhumi.gov.in"}}
-cookies = {'geNPRu9S': 'b882a17a0aec64ba2864d2cd0cd1d19d1a06d1557e709c3b8f4f02b95e14bc92', "JSESSIONID": '9F8F88CD90AFE8B1D1105FD7887440A0'}
+cookies = {'geNPRu9S': '2902e030657ed2f0eb10d972e8d807ccb3eae48e884f68cfe858e4c228a54da3', "JSESSIONID": '296D8A332894DA04B436AE0AE4DC5F45'}
 
 possible_headers = [
     {
@@ -249,11 +250,11 @@ def grab_and_parse_plot_info(session, state, plot, giscode):
             return {"id": data["plotid"], "area": data["area"], "info": data["info"], "link": data["infoLinks"], "geometry": data["the_geom"], "owner_plots": data["ownerplots"]}
         else:
             # Return an error code if not
-            print(f"Failed to download data from: {url}, status code: {response.status_code}", )
+            print(f"PID: {os.getpid()}, Failed to download data from: {url}, status code: {response.status_code}", )
             return ""
     except Exception as e:
-        print(f"Failed to download data from: {url}, error: {e}")
-        return 0
+        print(f"PID: {os.getpid()}, Failed to download data from: {url}, error: {e}")
+        return ""
 
 
 def grab_and_parse_plot_extent(session, state, plotid, giscode):
@@ -288,11 +289,32 @@ def grab_and_parse_plot_extent(session, state, plotid, giscode):
             # return {plot: {} for plot in data}
         else:
             # Return an error code if not
-            print(f"Failed to download data from: {url}, status code: {response.status_code}", )
+            print(f"PID: {os.getpid()}, Failed to download data from: {url}, status code: {response.status_code}", )
             return ""
     except Exception as e:
-        print(f"Failed to download data from: {url}, error: {e}")
-        return 0
+        print(f"PID: {os.getpid()}, Failed to download data from: {url}, error: {e}")
+        return ""
+
+
+def populate_taluk_plots(state, taluk, cat_code, dist_code, tal_code):
+
+    map = "VM" if cat_code == "R" else "CM"
+    output_path = f"./{state}/{cat_code}{map}{dist_code}{tal_code}.json"
+    if os.path.exists(output_path):
+        return
+
+    with requests.Session() as session:
+
+        for village in tqdm(taluk.keys()):
+            vil_code = village.split(",")[0]
+
+            for plot in taluk[village]["plots"].keys():
+                plot_info = grab_and_parse_plot_info(session, state, plot, "".join([cat_code, map, dist_code, tal_code, vil_code]))
+                plot_info["extent"] = grab_and_parse_plot_extent(session, state, plot_info["id"], "".join([cat_code, map, dist_code, tal_code, vil_code]))
+                taluk[village]["plots"][plot] = plot_info
+
+    with open(output_path, "w") as file:
+        json.dump(taluk, file)
 
 
 def populate_plot_info(state, json_path):
@@ -300,26 +322,19 @@ def populate_plot_info(state, json_path):
     with open(json_path, "r", encoding="utf8") as file:
         data = json.load(file)
 
-    with requests.Session() as session:
+    mp_tasks = []
+    for category in data.keys():
+        cat_code = category.split(",")[0]
+        for district in data[category].keys():
+            dist_code = district.split(",")[0]
+            for taluk in data[category][district].keys():
+                tal_code = taluk.split(",")[0]
 
-        for category in data.keys():
-            cat_code = category.split(",")[0]
-            for district in tqdm(data[category].keys()):
-                dist_code = district.split(",")[0]
-                for taluk in data[category][district].keys():
-                    tal_code = taluk.split(",")[0]
-                    for village in data[category][district][taluk].keys():
-                        vil_code = village.split(",")[0]
-                        map = "VM" if cat_code == "R" else "CM"
+                mp_tasks.append((state, data[category][district][taluk], cat_code, dist_code, tal_code))
+                # populate_district_plots(state, data[category][district], cat_code, dist_code)
 
-                        for plot in tqdm(data[category][district][taluk][village]["plots"].keys()):
-
-                            plot_info = grab_and_parse_plot_info(session, state, plot, "".join([cat_code, map, dist_code, tal_code, vil_code]))
-                            plot_info["extent"] = grab_and_parse_plot_extent(session, state, plot_info["id"], "".join([cat_code, map, dist_code, tal_code, vil_code]))
-                            data[category][district][taluk][village]["plots"][plot] = plot_info
-
-                with open(f"./{state}/{cat_code}{map}{dist_code}.json", "w") as file:
-                    json.dump(data, file)
+    with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
+        pool.starmap(populate_taluk_plots, mp_tasks)
 
 
 if __name__ == "__main__":
