@@ -249,6 +249,9 @@ def grab_and_parse_plot_info(session, state, plot, giscode):
             data = json.loads(response.text)
             return {"id": data["plotid"], "area": data["area"], "info": data["info"], "link": data["infoLinks"], "geometry": data["the_geom"], "owner_plots": data["ownerplots"]}
         else:
+            if response.status_code == 204:
+                print(f"This is a known issue with error code {response.status_code} for giscode {giscode}. Continuing gracefully.")
+                return {"id": "skip"}
             # Return an error code if not
             print(f"PID: {os.getpid()}, Failed to download data from: {url}, status code: {response.status_code}", )
             return ""
@@ -306,19 +309,25 @@ def populate_village_plots(state, village, cat_code, dist_code, tal_code, vil_co
 
     with requests.Session() as session:
 
-        while not finished:
-            try:
-                for plot in tqdm(village["plots"].keys()):
+        for plot in tqdm(village["plots"].keys()):
+
+            finished = False
+            while not finished:
+                try:
                     plot_info = grab_and_parse_plot_info(session, state, plot, "".join([cat_code, map, dist_code, tal_code, vil_code]))
+                    if plot_info["id"] == "skip":
+                        break
+
                     plot_info["extent"] = grab_and_parse_plot_extent(session, state, plot_info["id"], "".join([cat_code, map, dist_code, tal_code, vil_code]))
-                    village["plots"][plot] = plot_info
+                    finished = True
 
-                with open(output_path, "w") as file:
-                    json.dump(village, file)
-                finished = True
+                except Exception as e:
+                    print(f"Encountered error {e}, retrying...")
 
-            except Exception as e:
-                print(f"Encountered error {e}, retrying...")
+            village["plots"][plot] = plot_info
+
+        with open(output_path, "w") as file:
+            json.dump(village, file)
 
 
 def populate_plot_info(state, json_path):
@@ -342,7 +351,7 @@ def populate_plot_info(state, json_path):
                     # populate_village_plots(state, data[category][district][taluks][village], cat_code, dist_code, tal_code, vil_code)
 
     print("Spawning workers...")
-    with multiprocessing.Pool(2) as pool:
+    with multiprocessing.Pool(8) as pool:
         pool.starmap(populate_village_plots, mp_tasks)
 
 
@@ -355,5 +364,9 @@ if __name__ == "__main__":
 
     # This populates ./{state}/village_extents.json with the rough (square) extents of each village
     # populate_village_extent(state, f"./{state}/villages.json")
+
+    # This populates ?
     # populate_plots(state, f"./{state}/village_extents.json")
+
+    # This populates the ./{state} directory with .json files representing the plot info and extents for each village
     populate_plot_info(state, f"./{state}/plots.json")
