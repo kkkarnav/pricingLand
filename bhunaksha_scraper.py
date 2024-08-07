@@ -7,7 +7,7 @@ from pprint import pprint
 from tqdm import tqdm
 
 states = {"Maharashtra": {"code": 27, "link": "https://mahabhunakasha.mahabhumi.gov.in"}}
-cookies = {'geNPRu9S': '2902e030657ed2f0eb10d972e8d807ccb3eae48e884f68cfe858e4c228a54da3', "JSESSIONID": '296D8A332894DA04B436AE0AE4DC5F45'}
+cookies = {'geNPRu9S': '73170a4dba20d3b606b03a94b6247b7d3deca906809a53bdcee4069d9eab54e7', "JSESSIONID": '73C4543D07C203CD99D49C93AA1A9DB1'}
 
 possible_headers = [
     {
@@ -296,31 +296,37 @@ def grab_and_parse_plot_extent(session, state, plotid, giscode):
         return ""
 
 
-def populate_taluk_plots(state, taluk, cat_code, dist_code, tal_code):
+def populate_village_plots(state, village, cat_code, dist_code, tal_code, vil_code):
 
+    finished = False
     map = "VM" if cat_code == "R" else "CM"
-    output_path = f"./{state}/{cat_code}{map}{dist_code}{tal_code}.json"
+    output_path = f"./{state}/{cat_code}{map}{dist_code}{tal_code}{vil_code}.json"
     if os.path.exists(output_path):
         return
 
     with requests.Session() as session:
 
-        for village in tqdm(taluk.keys()):
-            vil_code = village.split(",")[0]
+        while not finished:
+            try:
+                for plot in tqdm(village["plots"].keys()):
+                    plot_info = grab_and_parse_plot_info(session, state, plot, "".join([cat_code, map, dist_code, tal_code, vil_code]))
+                    plot_info["extent"] = grab_and_parse_plot_extent(session, state, plot_info["id"], "".join([cat_code, map, dist_code, tal_code, vil_code]))
+                    village["plots"][plot] = plot_info
 
-            for plot in taluk[village]["plots"].keys():
-                plot_info = grab_and_parse_plot_info(session, state, plot, "".join([cat_code, map, dist_code, tal_code, vil_code]))
-                plot_info["extent"] = grab_and_parse_plot_extent(session, state, plot_info["id"], "".join([cat_code, map, dist_code, tal_code, vil_code]))
-                taluk[village]["plots"][plot] = plot_info
+                with open(output_path, "w") as file:
+                    json.dump(village, file)
+                finished = True
 
-    with open(output_path, "w") as file:
-        json.dump(taluk, file)
+            except Exception as e:
+                print(f"Encountered error {e}, retrying...")
 
 
 def populate_plot_info(state, json_path):
 
     with open(json_path, "r", encoding="utf8") as file:
         data = json.load(file)
+
+    print("Loaded plots info into memory.")
 
     mp_tasks = []
     for category in data.keys():
@@ -329,20 +335,25 @@ def populate_plot_info(state, json_path):
             dist_code = district.split(",")[0]
             for taluk in data[category][district].keys():
                 tal_code = taluk.split(",")[0]
+                for village in data[category][district][taluk].keys():
+                    vil_code = village.split(",")[0]
 
-                mp_tasks.append((state, data[category][district][taluk], cat_code, dist_code, tal_code))
-                # populate_district_plots(state, data[category][district], cat_code, dist_code)
+                    mp_tasks.append((state, data[category][district][taluk][village], cat_code, dist_code, tal_code, vil_code))
+                    # populate_village_plots(state, data[category][district][taluks][village], cat_code, dist_code, tal_code, vil_code)
 
-    with multiprocessing.Pool(multiprocessing.cpu_count()) as pool:
-        pool.starmap(populate_taluk_plots, mp_tasks)
+    print("Spawning workers...")
+    with multiprocessing.Pool(2) as pool:
+        pool.starmap(populate_village_plots, mp_tasks)
 
 
 if __name__ == "__main__":
 
     state = "Maharashtra"
 
-    # Grab the names and codes for all districts, villages, etc.
+    # This populates ./{state}/villages.json with the codes and names required to look up each village
     # construct_village_json(state)
+
+    # This populates ./{state}/village_extents.json with the rough (square) extents of each village
     # populate_village_extent(state, f"./{state}/villages.json")
     # populate_plots(state, f"./{state}/village_extents.json")
     populate_plot_info(state, f"./{state}/plots.json")
