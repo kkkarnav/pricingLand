@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 state = "Maharashtra"
 states = {"Maharashtra": {"code": 27, "link": "https://mahabhunakasha.mahabhumi.gov.in"}}
-cookies = {'geNPRu9S': 'ef6c56b688e53deaed3adc0ac7bff834da54dde5aaf6b3e2a56fdbadc5cf3093', "JSESSIONID": 'D04639FC167150D5BB7A5E834FB5ED96'}
+cookies = {'geNPRu9S': '6db48d6700437432b2b5f3c20665f6eb488a5200eb939608a69b14f1adeaf171', "JSESSIONID": 'FF8D31A3E954129C03C937D309A70DEE'}
 
 possible_headers = [
     {
@@ -152,8 +152,10 @@ def populate_village_extent(state, json_path):
                         vil_code = village.split(",")[0]
                         map = "VM" if cat_code == "R" else "CM"
 
-                        extents = grab_and_parse_extent(session, state, "".join([cat_code, map, dist_code, tal_code, vil_code]))
-                        data[category][district][taluk][village] = extents
+                        if data[category][district][taluk][village] == {} or data[category][district][taluk][village] == "":
+
+                                extents = grab_and_parse_extent(session, state, "".join([cat_code, map, dist_code, tal_code, vil_code]))
+                                data[category][district][taluk][village] = extents
 
             with open(f"./{state}/village_extents.json", "w") as file:
                 json.dump(data, file)
