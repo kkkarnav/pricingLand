@@ -255,9 +255,9 @@ def populate_village_extent(state, json_path):
                 json.dump(data, file)
 
 
-def grab_plot_numbers(session, state, district_code, giscode):
+def grab_and_parse_plot(session, state, district_code, giscode, post_data):
 
-    url = states[state]["link"] + "/rest/VillageMapService/kidelistFromGisCodeMH"
+    url = districts[district_code] + "ScalarDatahandler"
 
     # HTTP headers to make the server accept the request
     headers = {
@@ -275,48 +275,77 @@ def grab_plot_numbers(session, state, district_code, giscode):
         "Sec-Fetch-Site": "same-origin",
         "Sec-GPC": "1",
     }
-    post_data = f"state={states[state]['code']}&gisLevels={giscode}&srs=0"
 
     try:
-        response = session.post(url, data=post_data, headers=headers, cookies=cookies)
+        response = session.post(url+post_data, headers=headers, cookies=cookies)
         # Parse and return the successful response
         if response.status_code == 200:
             data = json.loads(response.text)
-            return {plot: {} for plot in data}
+            return data
         else:
             # Return an error code if not
             print(f"Failed to download data from: {url}, status code: {response.status_code}", )
             return ""
     except Exception as e:
         print(f"Failed to download data from: {url}, error: {e}")
-        return 0
+        return ""
 
 
+def populate_one_village(state, district_code, giscode, extents):
+    
+    plots = {}
+    
+    with requests.Session() as session:
+    
+        long = extents[1]
+        while long < extents[0]:
+            lat = extents[3]
+            while lat < extents[2]:
+                
+                post_data = f"?OP=4&state={states[state]['code']}&levels={giscode}&x={long}&y={lat}"
+                plot = grab_and_parse_plot(session, state, district_code, giscode, post_data)
+                if plot["has_data"] == "Y":
+                    plots[plot['plotNo']] = {"id": plot["ID"], "PNIU": plot["PNIU"], "extent": [plot["xmax"], plot["xmin"], plot["ymax"], plot["ymin"]], "info": plot["info"], "attributes": plot["attrs"], "links": plot["plotInfoLinks"]}
+                
+                lat += (extents[2] - extents[3])/100
+            long += (extents[0] - extents[1])/100
+    
+    return plots
+    
+    
 def populate_plots(state, json_path):
 
     with open(json_path, "r", encoding="utf8") as file:
         data = json.load(file)
+        
+    print("Loaded plots info into memory.")
 
-    with requests.Session() as session:
+    mp_tasks = []
+    for district in data.keys():
+        dist_code = district.split(" ")[0]
+        for taluk in data[district].keys():
+            tal_code = taluk.split(" ")[0]
+            for ri in data[district][taluk].keys():
+                ri_code = ri.split(" ")[0]
+                for village in data[district][taluk][ri].keys():
+                    vil_code = village.split(" ")[0]
+                    for sheet in tqdm(list(data[district][taluk][ri][village].keys())):
+                        sheet_code = sheet.split(" ")[0]
+                        
+                        if data[district][taluk][ri][village][sheet]["complete"] == False:
 
-        for district in data.keys():
-            dist_code = district.split(" ")[0]
-            for taluk in tqdm(data[district].keys()):
-                tal_code = taluk.split(" ")[0]
-                for ri in data[district][taluk].keys():
-                    ri_code = ri.split(" ")[0]
-                    for village in data[district][taluk][ri].keys():
-                        vil_code = village.split(" ")[0]
-                        for sheet in data[district][taluk][ri][village].keys():
-                            sheet_code = sheet.split(" ")[0]
-                            
-                            if (not data[district][taluk][ri][village][sheet]["plots"]) or data[district][taluk][ri][village][sheet]["plots"] == "":
+                            mp_tasks.append((state, data[district][taluk][ri][village][sheet], cat_code, dist_code, tal_code, vil_code))
+                            plots = populate_one_village(state, district.split(" ")[0], "%2C".join([dist_code, tal_code, ri_code, vil_code, sheet_code]), data[district][taluk][ri][village][sheet]["extent"])
+                            data[district][taluk][ri][village][sheet]["plots"] = plots
+                            data[district][taluk][ri][village][sheet]["complete"] = True
 
-                                plot_nums = grab_plot_numbers(session, state, district.split(" ")[0], "%2C".join([dist_code, tal_code, ri_code, vil_code, sheet_code]))
-                                data[category][district][taluk][village]["plots"] = plot_nums
+                        with open(f"./{state}/villages/{"".join([dist_code, tal_code, ri_code, vil_code])}.json", "w") as file:
+                            json.dump(data[district][taluk][ri][village], file)
 
-                        with open(f"./{state}/plots.json", "w") as file:
-                            json.dump(data, file)
+    print(len(mp_tasks))
+    print("Spawning workers...")
+    with multiprocessing.Pool(8) as pool:
+        pool.starmap(populate_village_plots, mp_tasks)
 
 
 if __name__ == "__main__":
@@ -330,7 +359,7 @@ if __name__ == "__main__":
     # populate_village_extent(state, f"./{state}/villages.json")
 
     # This populates ./{state}/plots.json with the plot numbers
-    populate_plots(state, f"./{state}/village_extents.json")
+    populate_plots(state, f"./{state}/plots.json")
 
     # This populates the ./{state} directory with .json files representing the plot info and extents for each village
     # populate_plot_info(state, f"./{state}/plots.json")

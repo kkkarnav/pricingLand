@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 state = "Maharashtra"
 states = {"Maharashtra": {"code": 27, "link": "https://mahabhunakasha.mahabhumi.gov.in"}}
-cookies = {'geNPRu9S': '6db48d6700437432b2b5f3c20665f6eb488a5200eb939608a69b14f1adeaf171', "JSESSIONID": 'FF8D31A3E954129C03C937D309A70DEE'}
+cookies = {'geNPRu9S': '48b64fb6626d88f91ded906923f3ba7e1152f964f5b4f12622203634c211999f', "JSESSIONID": '228AA29955E13CFE196AA05F47F67A15'}
 
 possible_headers = [
     {
@@ -315,6 +315,7 @@ def populate_village_plots(state, village, cat_code, dist_code, tal_code, vil_co
 
         for plot in tqdm(village["plots"].keys()):
 
+            counter = 0
             finished = False
             while not finished:
                 try:
@@ -326,7 +327,12 @@ def populate_village_plots(state, village, cat_code, dist_code, tal_code, vil_co
                     finished = True
 
                 except Exception as e:
-                    print(f"Encountered error {e}, retrying...")
+                    if counter < 100:
+                        counter += 1
+                        print(f"Encountered error {e}, retrying...")
+                    else:
+                        plot_info = "skip"
+                        break
 
             village["plots"][plot] = plot_info
 
@@ -350,10 +356,13 @@ def populate_plot_info(state, json_path):
                 tal_code = taluk.split(",")[0]
                 for village in data[category][district][taluk].keys():
                     vil_code = village.split(",")[0]
+                    
+                    map = "VM" if cat_code == "R" else "CM"
+                    output_path = f"./{state}/villages/{cat_code}{map}{dist_code}{tal_code}{vil_code}.json"
+                    if not os.path.exists(output_path):
+                        mp_tasks.append((state, data[category][district][taluk][village], cat_code, dist_code, tal_code, vil_code))
 
-                    mp_tasks.append((state, data[category][district][taluk][village], cat_code, dist_code, tal_code, vil_code))
-                    # populate_village_plots(state, data[category][district][taluks][village], cat_code, dist_code, tal_code, vil_code)
-
+    print(len(mp_tasks))
     print("Spawning workers...")
     with multiprocessing.Pool(8) as pool:
         pool.starmap(populate_village_plots, mp_tasks)
