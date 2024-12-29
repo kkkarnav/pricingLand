@@ -163,3 +163,4 @@ cython_debug/
 */districts/
 datasets/
 hls/
+*.qgz

@@ -362,7 +362,6 @@ def populate_plot_info(state, json_path):
                     if not os.path.exists(output_path):
                         mp_tasks.append((state, data[category][district][taluk][village], cat_code, dist_code, tal_code, vil_code))
 
-    print(len(mp_tasks))
     print("Spawning workers...")
     with multiprocessing.Pool(8) as pool:
         pool.starmap(populate_village_plots, mp_tasks)
