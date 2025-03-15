@@ -38,7 +38,7 @@ districts = {"1": "https://app1bhunakshaodisha.nic.in/bhunaksha/",
              "28": "https://app3bhunakshaodisha.nic.in:8443/bhunaksha/",
              "29": "https://app4bhunakshaodisha.nic.in:8443/bhunaksha/",
              "30": "https://app2bhunakshaodisha.nic.in:8443/bhunaksha/"}
-cookies = {"JSESSIONID": 'E62745EEF5A6FB7F3F450F1E50083520'}
+cookies = {"JSESSIONID": 'B27ED0C8E8D5213A053551B6F4A2A603'}
 
 possible_headers = [
     {
@@ -284,18 +284,22 @@ def grab_and_parse_plot(session, state, district_code, giscode, post_data):
             return data
         else:
             # Return an error code if not
-            print(f"Failed to download data from: {url}, status code: {response.status_code}", )
+            print(f"Failed to download data from: {url+post_data}, status code: {response.status_code}", )
             return ""
     except Exception as e:
-        print(f"Failed to download data from: {url}, error: {e}")
+        print(f"Failed to download data from: {url+post_data}, error: {e}")
         return ""
 
 
 def populate_one_village(state, village, district_code, giscode, extents):
     
+    if None in extents:
+        return
+    
     with requests.Session() as session:
         
         progress = tqdm(total=10000)
+        village["plots"] = {}
         
         long = extents[1]
         while long < extents[0]:
@@ -305,7 +309,6 @@ def populate_one_village(state, village, district_code, giscode, extents):
                 post_data = f"?OP=4&state={states[state]['code']}&levels={giscode}&x={long}&y={lat}"
                 plot = grab_and_parse_plot(session, state, district_code, giscode, post_data)
                 if plot["has_data"] == "Y":
-                    village["plots"] = {}
                     village["plots"][plot['plotNo']] = {"id": plot["ID"], "PNIU": plot["PNIU"], "extent": [plot["xmax"], plot["xmin"], plot["ymax"], plot["ymin"]], "info": plot["info"], "attributes": plot["attrs"], "links": plot["plotInfoLinks"]}
                 
                 progress.update(1)
@@ -313,7 +316,7 @@ def populate_one_village(state, village, district_code, giscode, extents):
             long += (extents[0] - extents[1])/100
     
     village["complete"] = True
-    with open(f"./{state}/villages/{"".join(giscode.split("%2C"))}.json", "w") as file:
+    with open(f"./{state}/villages/{"_".join(giscode.split("%2C"))}.json", "w") as file:
         json.dump(village, file)
     
     
@@ -336,14 +339,16 @@ def populate_plots(state, json_path):
                     for sheet in data[district][taluk][ri][village].keys():
                         sheet_code = sheet.split(" ")[0]
                         
-                        output_path = f"./{state}/villages/{dist_code}{tal_code}{ri_code}{vil_code}{sheet_code}.json"
+                        output_path = f"./{state}/villages/{dist_code}_{tal_code}_{ri_code}_{vil_code}_{sheet_code}.json"
                         if not os.path.exists(output_path):
                             mp_tasks.append((state, data[district][taluk][ri][village][sheet], district.split(" ")[0], "%2C".join([dist_code, tal_code, ri_code, vil_code, sheet_code]), data[district][taluk][ri][village][sheet]["extent"]))
 
     print(len(mp_tasks))
     print("Spawning workers...")
-    with multiprocessing.Pool(4) as pool:
+    with multiprocessing.Pool(32) as pool:
         pool.starmap(populate_one_village, mp_tasks)
+    # for task in mp_tasks:
+    #     populate_one_village(*task)
 
 
 if __name__ == "__main__":
